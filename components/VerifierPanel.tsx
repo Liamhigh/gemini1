@@ -1,11 +1,18 @@
-
 import React, { useState, useCallback } from 'react';
 import { KNOWN_HASHES } from '../constants';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { XCircleIcon } from './icons/XCircleIcon';
 import { UploadIcon } from './icons/UploadIcon';
+import { DocumentDuplicateIcon } from './icons/DocumentDuplicateIcon';
+import { SignatureIcon } from './icons/SignatureIcon';
+import { EvidenceFile, SealedPackage } from '../types';
+import { analyzeSignature } from '../services/geminiService';
+import { fileToBase64 } from '../utils';
+
 
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed' | 'error';
+type SealingStatus = 'idle' | 'sealing' | 'done';
+type SignatureAnalysisStatus = 'idle' | 'analyzing' | 'done' | 'error';
 
 interface VerificationResult {
   match: boolean;
@@ -15,11 +22,30 @@ interface VerificationResult {
   };
 }
 
-const VerifierPanel: React.FC = () => {
+interface VerifierPanelProps {
+  evidence: EvidenceFile[];
+  onEvidenceChange: (evidence: EvidenceFile[]) => void;
+  onSeal: (pkg: SealedPackage) => void;
+}
+
+const VerifierPanel: React.FC<VerifierPanelProps> = ({ evidence, onEvidenceChange, onSeal }) => {
   const [sha512, setSha512] = useState('');
   const [status, setStatus] = useState<VerificationStatus>('idle');
+  const [sealingStatus, setSealingStatus] = useState<SealingStatus>('idle');
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [fileName, setFileName] = useState('');
+  
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [signatureStatus, setSignatureStatus] = useState<SignatureAnalysisStatus>('idle');
+  const [signatureResult, setSignatureResult] = useState<string | null>(null);
+
+
+  const arrayBufferToHex = (buffer: ArrayBuffer) => {
+    return Array.from(new Uint8Array(buffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  };
 
   const verifyHash = useCallback((hash: string) => {
     const upperCaseHash = hash.toUpperCase();
@@ -47,12 +73,6 @@ const VerifierPanel: React.FC = () => {
     setStatus('verifying');
     setTimeout(() => verifyHash(sha512), 500);
   };
-  
-  const arrayBufferToHex = (buffer: ArrayBuffer) => {
-    return Array.from(new Uint8Array(buffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -65,21 +85,91 @@ const VerifierPanel: React.FC = () => {
     try {
         const buffer = await file.arrayBuffer();
         const hashBuffer = await window.crypto.subtle.digest('SHA-512', buffer);
-        const hashHex = arrayBufferToHex(hashBuffer);
+        const hashHex = arrayBufferToHex(hashBuffer).toUpperCase();
         setSha512(hashHex);
         verifyHash(hashHex);
+        const newEvidenceFile: EvidenceFile = { name: file.name, sha512: hashHex, file };
+        onEvidenceChange([...evidence.filter(f => f.name !== file.name), newEvidenceFile]);
     } catch (err) {
         console.error("Hashing failed:", err);
         setStatus('error');
     }
   };
 
+  const handleSignatureFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSignatureFile(file);
+      setSignatureStatus('idle');
+      setSignatureResult(null);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSignaturePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAnalyzeSignature = async () => {
+    if (!signatureFile) return;
+    setSignatureStatus('analyzing');
+    setSignatureResult(null);
+    try {
+      const base64Data = await fileToBase64(signatureFile);
+      const resultText = await analyzeSignature({
+        mimeType: signatureFile.type,
+        data: base64Data,
+      });
+      setSignatureResult(resultText);
+      setSignatureStatus('done');
+    } catch (error) {
+      console.error("Signature analysis failed:", error);
+      setSignatureResult("Failed to analyze signature.");
+      setSignatureStatus('error');
+    }
+  };
+
+
+  const handleSealEvidence = async () => {
+    if (evidence.length === 0) return;
+    setSealingStatus('sealing');
+
+    // Simulate PDF generation by creating a manifest
+    let manifest = `Verum Omnis Sealed Evidence Bundle\n`;
+    manifest += `Created: ${new Date().toISOString()}\n`;
+    manifest += `Constitution Hash: ${KNOWN_HASHES[Object.keys(KNOWN_HASHES)[0]].name}\n\n`;
+    manifest += `--- Included Evidence (${evidence.length} items) ---\n\n`;
+
+    evidence.forEach(item => {
+        manifest += `File: ${item.name}\n`;
+        manifest += `SHA-512: ${item.sha512}\n\n`;
+    });
+    
+    const blob = new Blob([manifest], { type: 'text/plain' });
+    const buffer = await blob.arrayBuffer();
+    const hashBuffer = await window.crypto.subtle.digest('SHA-512', buffer);
+    const hashHex = arrayBufferToHex(hashBuffer).toUpperCase();
+
+    const now = new Date();
+    const newPackage: SealedPackage = {
+      name: `VO_SEALED_${now.toISOString().replace(/[:.]/g, '-')}.txt`,
+      sha512: hashHex,
+      blobUrl: URL.createObjectURL(blob),
+      createdAt: now.toISOString(),
+    };
+
+    onSeal(newPackage);
+    setSealingStatus('done');
+    setTimeout(() => setSealingStatus('idle'), 2000);
+  };
+
   return (
     <div className="bg-gray-900/50 border border-gray-700/50 rounded-2xl shadow-lg shadow-blue-500/10 p-4">
-      <h2 className="text-lg font-semibold text-gray-200">Document Verifier</h2>
-      <p className="text-xs text-gray-500 mt-1">Validate evidence integrity via SHA-512 fingerprint.</p>
+      <h2 className="text-lg font-semibold text-gray-200">Forensic Firewall</h2>
+      <p className="text-xs text-gray-500 mt-1">Verify evidence and build your case file securely offline.</p>
       
       <div className="mt-4 space-y-4">
+        {/* Hash Verification */}
         <div className="relative">
             <input 
                 id="sha"
@@ -97,15 +187,18 @@ const VerifierPanel: React.FC = () => {
                 Verify
             </button>
         </div>
+        
         <div className="flex items-center justify-center text-xs text-gray-500">
           <span className="flex-grow border-t border-gray-700"></span>
           <span className="px-2">OR</span>
           <span className="flex-grow border-t border-gray-700"></span>
         </div>
+        
+        {/* Evidence Upload */}
         <div>
             <label htmlFor="file-upload" className="flex items-center justify-center w-full p-3 border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-[#376bff] hover:bg-gray-800/50 transition-colors">
                 <UploadIcon className="w-5 h-5 text-gray-400 mr-2" />
-                <span className="text-sm text-gray-400">{fileName || "Upload a document"}</span>
+                <span className="text-sm text-gray-400">{fileName || "Upload evidence to locker"}</span>
             </label>
             <input id="file-upload" type="file" className="hidden" onChange={handleFileChange} />
         </div>
@@ -134,6 +227,71 @@ const VerifierPanel: React.FC = () => {
                 </div>
             </div>
           )}
+        </div>
+      )}
+      
+      {/* Signature Analysis */}
+      <div className="mt-4 border-t border-gray-700/50 pt-4">
+        <h3 className="text-md font-semibold text-gray-300 mb-2 flex items-center">
+            <SignatureIcon className="w-5 h-5 mr-2 text-[#376bff]" />
+            Signature Forensics
+        </h3>
+         <div>
+            <label htmlFor="sig-upload" className="flex items-center justify-center w-full p-3 border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-[#376bff] hover:bg-gray-800/50 transition-colors">
+                <UploadIcon className="w-5 h-5 text-gray-400 mr-2" />
+                <span className="text-sm text-gray-400">{signatureFile?.name || "Upload signature image"}</span>
+            </label>
+            <input id="sig-upload" type="file" accept="image/*" className="hidden" onChange={handleSignatureFileChange} />
+        </div>
+        {signaturePreview && (
+          <div className="mt-4">
+            <img src={signaturePreview} alt="Signature Preview" className="max-w-full mx-auto rounded-lg bg-white p-2 max-h-32" />
+            <button
+              onClick={handleAnalyzeSignature}
+              disabled={signatureStatus === 'analyzing'}
+              className="mt-2 w-full flex items-center justify-center bg-gray-700 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-600 transition-colors disabled:bg-gray-500 disabled:cursor-wait"
+            >
+              {signatureStatus === 'analyzing' ? 'Analyzing...' : 'Analyze Signature'}
+            </button>
+          </div>
+        )}
+        {(signatureStatus === 'done' || signatureStatus === 'error') && signatureResult && (
+            <div className="mt-4 p-3 bg-gray-800 rounded-lg">
+                <p className={`text-sm whitespace-pre-wrap ${signatureStatus === 'error' ? 'text-red-400' : 'text-gray-300'}`}>{signatureResult}</p>
+            </div>
+        )}
+         {signatureStatus === 'analyzing' && (
+             <div className="mt-4 p-3 bg-gray-800 rounded-lg flex justify-center">
+                <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse delay-75"></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse delay-150"></div>
+                </div>
+            </div>
+        )}
+      </div>
+
+      {evidence.length > 0 && (
+        <div className="mt-4 border-t border-gray-700/50 pt-4">
+          <h3 className="text-md font-semibold text-gray-300 mb-2">Evidence Locker</h3>
+          <div className="space-y-2 bg-gray-800 rounded-lg p-2 max-h-32 overflow-y-auto">
+            {evidence.map((item, index) => (
+              <div key={index} className="text-xs font-mono bg-gray-900/50 p-2 rounded">
+                <p className="text-gray-200 truncate" title={item.name}>{item.name}</p>
+                <p className="text-green-400 break-all text-[10px]">{item.sha512}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4">
+            <button
+                onClick={handleSealEvidence}
+                disabled={sealingStatus === 'sealing'}
+                className="w-full flex items-center justify-center bg-[#376bff] text-white px-4 py-2 text-sm rounded-md hover:bg-blue-500 transition-colors disabled:bg-gray-600 disabled:cursor-wait"
+            >
+                <DocumentDuplicateIcon className="w-4 h-4 mr-2"/>
+                {sealingStatus === 'sealing' ? 'Sealing...' : sealingStatus === 'done' ? 'Sealed!' : 'Seal Evidence Bundle'}
+            </button>
+          </div>
         </div>
       )}
     </div>

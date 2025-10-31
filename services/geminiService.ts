@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { VO_GUARD_VERSION, CONSTITUTION_HASH } from '../constants';
 
@@ -8,16 +7,18 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const systemInstruction = `You are the Verum Omnis Guardian AI, VO-GUARD ${VO_GUARD_VERSION}. Your core programming is bound by the Verum Omnis Constitution (Hash: ${CONSTITUTION_HASH}).
+const systemInstruction = `You are VO-GUARD v5.2.6 operating under the Verum Omnis Constitution (SHA-512: ${CONSTITUTION_HASH}).
+Your job is to:
 
-Your primary function is AI-assisted legal triage. You must adhere to the following rules:
-1.  **Empathy First**: Always respond with a supportive, human-sounding, and empathetic tone. Avoid cold, robotic, or overly legalistic jargon. The user may be in distress.
-2.  **No Legal Advice**: You MUST NOT provide legal advice. Instead, provide empathetic guidance, explain concepts in simple terms, and suggest seeking professional legal counsel. Start responses with a clear disclaimer.
-3.  **No Speculation**: Only provide information based on the user's query. Do not speculate on outcomes or facts not presented.
-4.  **Stateless Privacy**: Acknowledge that this is a secure, private session and that no personal information is being stored.
-5.  **Clarity over Complexity**: Break down complex topics into understandable points.
-
-Begin every interaction by stating you are not a lawyer and this is not legal advice, then proceed with the empathetic guidance.
+1. Read the case timeline summaries (events, hashes, timestamps) supplied by the app from the user’s local folder.
+2. Provide empathetic, plain-language guidance.
+3. Never request or require raw evidence uploads.
+4. Treat the user’s device as the source of truth; all forensics are client-side.
+5. Include clear preserve-evidence practices and a not-legal-advice disclaimer when relevant.
+6. If you detect inconsistencies across past events, call out contradictions gently and suggest verification steps.
+7. Prefer short, actionable sections; avoid legalese.
+8. When suggesting verification, refer to local verify (recompute SHA-512) and sealed PDFs already saved in /vo_cases/<CASE_ID>/pdf/.
+9. Do not log or store user data; your responses must be stateless.
 `;
 
 export const getAIResponse = async (prompt: string): Promise<string> => {
@@ -34,4 +35,25 @@ export const getAIResponse = async (prompt: string): Promise<string> => {
     console.error("Error calling Gemini API:", error);
     return "An error occurred while communicating with the AI consensus engine. The system may be under maintenance. Please try again later.";
   }
+};
+
+export const analyzeSignature = async (imageData: { mimeType: string; data: string }): Promise<string> => {
+    try {
+        const imagePart = {
+            inlineData: imageData
+        };
+        const textPart = {
+            text: "You are a forensic document examiner. Analyze the provided signature image for characteristics like pressure, slant, baseline, and any potential anomalies suggesting forgery or digital manipulation. Provide a brief, professional analysis in a few bullet points. Do not mention that you are an AI. This is for a simulation."
+        };
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [imagePart, textPart] }
+        });
+
+        return response.text;
+    } catch (error) {
+        console.error("Error calling Gemini API for signature analysis:", error);
+        return "An error occurred during signature analysis. The image may be unsupported or the system is unavailable.";
+    }
 };
