@@ -1,4 +1,4 @@
-// FIX: Removed `GenerateContentParameters` as it's not the correct type for the `contents` property.
+// FIX: Document handling logic updated to correctly process PDFs and other supported formats.
 import { GoogleGenAI } from "@google/genai";
 import { ChatMessage } from '../types';
 import { fileToBase64 } from "../utils";
@@ -29,7 +29,6 @@ Your task is to take the user's chat transcript and fill out the "DEEPSEEK VERUM
 
 // --- Triple-AI Provider Stubs ---
 
-// FIX: Changed the type of `contents` to a structural type that accepts a string or an object with a `parts` array.
 async function callGemini(contents: string | { parts: any[] }, systemInstruction: string): Promise<string> {
   try {
     const response = await ai.models.generateContent({
@@ -67,11 +66,20 @@ function buildConsensus(parts: string[]): string {
 
 export const getTriageResponse = async (prompt: string, file: File | null): Promise<{ consensus: string, raw: { provider: string, text: string }[] }> => {
   try {
-    // FIX: Changed the type of `geminiContents` to correctly handle both string prompts and multi-part content (text + image).
     let geminiContents: string | { parts: any[] } = prompt;
 
     if (file) {
-      if (file.type.startsWith('image/')) {
+      // These MIME types can be sent directly to the Gemini API as inlineData
+      const directUploadMimeTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/heic',
+        'image/heif',
+        'application/pdf',
+      ];
+
+      if (directUploadMimeTypes.includes(file.type)) {
         const base64Data = await fileToBase64(file);
         geminiContents = {
           parts: [
@@ -79,12 +87,14 @@ export const getTriageResponse = async (prompt: string, file: File | null): Prom
             { inlineData: { mimeType: file.type, data: base64Data } }
           ]
         };
-      } else if (file.type.startsWith('text/') || file.type === 'application/pdf' || file.type === 'application/msword') {
+      } else if (file.type.startsWith('text/')) {
+        // Plain text files can be read and appended to the prompt
         const fileText = await file.text();
         const combinedPrompt = `${prompt}\n\n--- Attached Document (${file.name}) ---\n${fileText}`;
         geminiContents = combinedPrompt;
       } else {
-        const combinedPrompt = `${prompt}\n\n[Attached non-previewable file: ${file.name}]`;
+        // For other file types, inform the user they cannot be previewed
+        const combinedPrompt = `${prompt}\n\n[Attached non-previewable file: ${file.name}. Its content cannot be analyzed.]`;
         geminiContents = combinedPrompt;
       }
     }
