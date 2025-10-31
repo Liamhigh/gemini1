@@ -4,15 +4,10 @@ import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { XCircleIcon } from './icons/XCircleIcon';
 import { UploadIcon } from './icons/UploadIcon';
 import { DocumentDuplicateIcon } from './icons/DocumentDuplicateIcon';
-import { SignatureIcon } from './icons/SignatureIcon';
 import { EvidenceFile, SealedPackage } from '../types';
-import { analyzeSignature } from '../services/geminiService';
-import { fileToBase64 } from '../utils';
-
 
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed' | 'error';
 type SealingStatus = 'idle' | 'sealing' | 'done';
-type SignatureAnalysisStatus = 'idle' | 'analyzing' | 'done' | 'error';
 
 interface VerificationResult {
   match: boolean;
@@ -34,12 +29,6 @@ const VerifierPanel: React.FC<VerifierPanelProps> = ({ evidence, onEvidenceChang
   const [sealingStatus, setSealingStatus] = useState<SealingStatus>('idle');
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [fileName, setFileName] = useState('');
-  
-  const [signatureFile, setSignatureFile] = useState<File | null>(null);
-  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
-  const [signatureStatus, setSignatureStatus] = useState<SignatureAnalysisStatus>('idle');
-  const [signatureResult, setSignatureResult] = useState<string | null>(null);
-
 
   const arrayBufferToHex = (buffer: ArrayBuffer) => {
     return Array.from(new Uint8Array(buffer))
@@ -96,48 +85,12 @@ const VerifierPanel: React.FC<VerifierPanelProps> = ({ evidence, onEvidenceChang
     }
   };
 
-  const handleSignatureFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSignatureFile(file);
-      setSignatureStatus('idle');
-      setSignatureResult(null);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSignaturePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleAnalyzeSignature = async () => {
-    if (!signatureFile) return;
-    setSignatureStatus('analyzing');
-    setSignatureResult(null);
-    try {
-      const base64Data = await fileToBase64(signatureFile);
-      const resultText = await analyzeSignature({
-        mimeType: signatureFile.type,
-        data: base64Data,
-      });
-      setSignatureResult(resultText);
-      setSignatureStatus('done');
-    } catch (error) {
-      console.error("Signature analysis failed:", error);
-      setSignatureResult("Failed to analyze signature.");
-      setSignatureStatus('error');
-    }
-  };
-
-
   const handleSealEvidence = async () => {
     if (evidence.length === 0) return;
     setSealingStatus('sealing');
 
-    // Simulate PDF generation by creating a manifest
     let manifest = `Verum Omnis Sealed Evidence Bundle\n`;
-    manifest += `Created: ${new Date().toISOString()}\n`;
-    manifest += `Constitution Hash: ${KNOWN_HASHES[Object.keys(KNOWN_HASHES)[0]].name}\n\n`;
+    manifest += `Created: ${new Date().toISOString()}\n\n`;
     manifest += `--- Included Evidence (${evidence.length} items) ---\n\n`;
 
     evidence.forEach(item => {
@@ -230,47 +183,6 @@ const VerifierPanel: React.FC<VerifierPanelProps> = ({ evidence, onEvidenceChang
         </div>
       )}
       
-      {/* Signature Analysis */}
-      <div className="mt-4 border-t border-gray-700/50 pt-4">
-        <h3 className="text-md font-semibold text-gray-300 mb-2 flex items-center">
-            <SignatureIcon className="w-5 h-5 mr-2 text-[#376bff]" />
-            Signature Forensics
-        </h3>
-         <div>
-            <label htmlFor="sig-upload" className="flex items-center justify-center w-full p-3 border-2 border-dashed border-gray-600 rounded-lg cursor-pointer hover:border-[#376bff] hover:bg-gray-800/50 transition-colors">
-                <UploadIcon className="w-5 h-5 text-gray-400 mr-2" />
-                <span className="text-sm text-gray-400">{signatureFile?.name || "Upload signature image"}</span>
-            </label>
-            <input id="sig-upload" type="file" accept="image/*" className="hidden" onChange={handleSignatureFileChange} />
-        </div>
-        {signaturePreview && (
-          <div className="mt-4">
-            <img src={signaturePreview} alt="Signature Preview" className="max-w-full mx-auto rounded-lg bg-white p-2 max-h-32" />
-            <button
-              onClick={handleAnalyzeSignature}
-              disabled={signatureStatus === 'analyzing'}
-              className="mt-2 w-full flex items-center justify-center bg-gray-700 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-600 transition-colors disabled:bg-gray-500 disabled:cursor-wait"
-            >
-              {signatureStatus === 'analyzing' ? 'Analyzing...' : 'Analyze Signature'}
-            </button>
-          </div>
-        )}
-        {(signatureStatus === 'done' || signatureStatus === 'error') && signatureResult && (
-            <div className="mt-4 p-3 bg-gray-800 rounded-lg">
-                <p className={`text-sm whitespace-pre-wrap ${signatureStatus === 'error' ? 'text-red-400' : 'text-gray-300'}`}>{signatureResult}</p>
-            </div>
-        )}
-         {signatureStatus === 'analyzing' && (
-             <div className="mt-4 p-3 bg-gray-800 rounded-lg flex justify-center">
-                <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse delay-75"></div>
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse delay-150"></div>
-                </div>
-            </div>
-        )}
-      </div>
-
       {evidence.length > 0 && (
         <div className="mt-4 border-t border-gray-700/50 pt-4">
           <h3 className="text-md font-semibold text-gray-300 mb-2">Evidence Locker</h3>

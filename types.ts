@@ -1,8 +1,9 @@
-
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model' | 'system';
-  text: string;
+  text: string; // This will hold the consensus text
+  rawResponses?: { provider: string; text: string }[];
+  attachment?: { name: string };
 }
 
 export interface EvidenceFile {

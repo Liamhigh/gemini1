@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { VO_GUARD_VERSION, CONSTITUTION_HASH } from '../constants';
 import { ShieldCheckIcon } from './icons/ShieldCheckIcon';
